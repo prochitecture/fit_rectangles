@@ -131,10 +131,10 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
                         counter-clockwise order.
     """
     # compute center of gravity of polygon
-    center = mathutils.Vector((0.,0.,0.))
-    for i in range(firstVertIndex,firstVertIndex+numVerts):
-        center += verts[i]
-    center /= numVerts
+    center = sum(
+        ( verts[i] for i in range(firstVertIndex, firstVertIndex+numVerts) ),
+        mathutils.Vector((0., 0.))
+    )/numVerts
 
     # create 2D edges as list and as contours for skeletonization by bpypolyskel
     lastUIndex = numVerts-1
@@ -293,9 +293,8 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         edges.extend(rectEdges)
         rectangles.append(rectVerts)
 
-    # return as list of rectangles, every rectangle as list of vertices in counter-clockwise order
-    rectList = []
-    for r in rectangles:
-        rect = [ (mathutils.Vector((v[0],v[1],0.)) + center) for v in r]
-        rectList.append(rect)
+    # return a Python tuple of rectangles, every rectangle as list of vertices in counter-clockwise order
+    rectList = tuple(
+        tuple( (v + center) for v in rectangle ) for rectangle in rectangles
+    )
     return rectList
