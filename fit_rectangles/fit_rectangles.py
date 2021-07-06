@@ -293,8 +293,8 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         edges.extend(rectEdges)
         rectangles.append(rectVerts)
 
-    # return a Python tuple of rectangles, every rectangle as list of vertices in counter-clockwise order
-    rectList = tuple(
+    # return a Python list of rectangles, every rectangle as list of vertices in counter-clockwise order
+    rectList = [
         tuple( (v + center) for v in rectangle ) for rectangle in rectangles
-    )
+    ]
     return rectList
