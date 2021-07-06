@@ -1,14 +1,13 @@
-import numpy as np
+from math import tan, sin, pi
 import mathutils
-from operator import itemgetter
 from lib.bpypolyskel.bpypolyskel import skeletonize
 from lib.bpypolyskel.bpyeuclid import Edge2
 
 # parameters
-MAX_SLOPE    = np.tan(5./180.*np.pi)       # maximum slope (5°) of skeleton edges to be accepted as roof rodges
-MAX_STRAIGHT = np.sin(5./180.*np.pi)       # maximum angle (5°) between edges to be accepted as straight angle
-MARGIN       = 0.5                         # vertical safety margin of rectangle 
-MINDIM       = 2.                          # minimal dimension of the rectangles 
+MAX_SLOPE    = tan(5./180.*pi)  # maximum slope (5°) of skeleton edges to be accepted as roof rodges
+MAX_STRAIGHT = sin(5./180.*pi)  # maximum angle (5°) between edges to be accepted as straight angle
+MARGIN       = 0.5              # vertical safety margin of rectangle 
+MINDIM       = 2.               # minimal dimension of the rectangles 
 
 # crossing number test for a point in a polygon
 # input:  p = a point,
@@ -94,7 +93,7 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
     ----------
     verts:              A list of vertices. Vertices that define the outer contour of the footprint polygon are
                         located in a continuous block of the verts list, starting at the index firstVertIndex.
-                        Each vertex is an instance of mathutils.Vector with 3 coordinates x, y and z.
+                        Each vertex is an instance of mathutils.Vector with 2 coordinates x and y.
 
                         The outer contour of the footprint polygon contains numVerts vertices in counterclockwise
                         order, in its block in verts.
@@ -105,8 +104,7 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
 
     firstVertIndex: 	The first index of vertices of the polygon index in the verts list that defines the footprint polygon.
 
-    numVerts:           The first index of the vertices in the verts list of the polygon, that defines the outer
-                        contour of the footprint.
+    numVerts:           The number of vertices that define the outer contour of the footprint.
 
     holesInfo:          If the footprint polygon contains holes, their position and length in the verts list are
                         described by this argument. holesInfo is a list of tuples, one for every hole. The first
@@ -211,7 +209,9 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
                 ridgeEdges.append(value)
 
     # sort ridge edges by descending minimum skeleton height
-    sortRidges = np.argsort( [min(s_heights[i1],s_heights[i2]) for i1,i2 in ridgeEdges] )[::-1]
+    minRidgeHeights = [min(s_heights[i1],s_heights[i2]) for i1,i2 in ridgeEdges]
+    # numpy.argsort replaced, see https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+    sortRidges = sorted(range(len(minRidgeHeights)), key=minRidgeHeights.__getitem__)[::-1]
 
     # these lists will also contain rectangle vertices and edges
     # to detect intersecteions
@@ -256,13 +256,13 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         # add the x-values of the intersections of lines parallel to the x-axis
         # at y=-yDist and y=yDist
         for i1,i2 in edges:
-            if np.diff( np.sign( [rotVerts[i1][1]-yDist,rotVerts[i2][1]-yDist] ) ):
+            if ((rotVerts[i1][1]-yDist)>0.) ^ ((rotVerts[i2][1]-yDist)>0.): # detects sign change of y -> intersection
                 verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],-yDist) )
-            if np.diff( np.sign( [rotVerts[i1][1]+yDist,rotVerts[i2][1]+yDist] ) ):
+            if ((rotVerts[i1][1]+yDist)>0.) ^ ((rotVerts[i2][1]+yDist)>0.): # detects sign change of y -> intersection
                 verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],yDist) )
 
         # find x-limits left and right of the anchor
-        leftX  = max([x for x in verticesX if x < 0.])+ 0.1
+        leftX  = max([x for x in verticesX if x < 0.]) + 0.1
         rightX = min([x for x in verticesX if x >= 0.]) - 0.1
 
         # discard rectangle if too small
