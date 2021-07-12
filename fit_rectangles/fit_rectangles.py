@@ -4,7 +4,6 @@ from lib.bpypolyskel.bpypolyskel import skeletonize
 from lib.bpypolyskel.bpyeuclid import Edge2
 
 # parameters
-MAX_SLOPE    = tan(5./180.*pi)  # maximum slope (5°) of skeleton edges to be accepted as roof rodges
 MAX_STRAIGHT = sin(5./180.*pi)  # maximum angle (5°) between edges to be accepted as straight angle
 MARGIN       = 0.5              # vertical safety margin of rectangle 
 MINDIM       = 2.               # minimal dimension of the rectangles 
@@ -187,12 +186,17 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
                 index2 = skelIndex[0]
                 skelEdges.append((index1,index2))
 
-    # find ridges (indices of roof edges) (egde slope < MAX_SLOPE)
-    ridgeEdges = [(i1,i2) for i1,i2 in skelEdges if abs(s_heights[i1]-s_heights[i2])/(s_nodes[i1]-s_nodes[i2]).magnitude < MAX_SLOPE]
 
-    # remove ridge vertices that have straight angles between their edges
+    # maybe the building is circular, then create artificial skeleton edge
+    if len(s_nodes)==1:
+        s_nodes = [ s_nodes[0]-mathutils.Vector((0.2,0)), s_nodes[0]+mathutils.Vector((0.2,0))]
+        s_heights = [ s_heights[0]/1.414, s_heights[0]/1.414 ]
+        skelEdges = [(0,1)]
+
+    # remove ridge vertices that have straight angles between their edges.
+    # construct graph
     graph = {}
-    for i1,i2 in ridgeEdges:
+    for i1,i2 in skelEdges:
         if i1 not in graph:
             graph[i1] = []
         if i2 not in graph:
@@ -200,16 +204,34 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         graph[i1].append(i2)
         graph[i2].append(i1)
 
-    for key, value in graph.items():
-        if len(value)==2:
-            r1 = (s_nodes[value[0]] - s_nodes[key]).normalized()
-            r2 = (s_nodes[value[1]] - s_nodes[key]).normalized()
-            if abs(r1.cross(r2)) < MAX_STRAIGHT:
-                ridgeEdges = [ edge for edge in ridgeEdges if key not in edge]
-                ridgeEdges.append(value)
+    # remove nodes with straight angles
+    while True:
+        hadStraight = False
+        g0 = graph.copy()
+        for key, value in graph.items():
+            if len(value)==2:
+                r1 = (s_nodes[value[0]] - s_nodes[key]).normalized()
+                r2 = (s_nodes[value[1]] - s_nodes[key]).normalized()
+                if abs(r1.cross(r2)) < MAX_STRAIGHT:
+                    hadStraight = True
+                    del g0[key]
+                    e1 = g0[value[0]]
+                    e1[e1.index(key)] = value[1]
+                    e2 = g0[value[1]]
+                    e2[e2.index(key)] = value[0]
+        graph = g0
+        if not hadStraight:
+            break
+
+    # get edges back
+    ridgeEdges = []
+    for node in graph:
+        for neighbour in graph[node]:
+            if (neighbour, node) not in ridgeEdges and (node, neighbour) not in ridgeEdges:
+                ridgeEdges.append((node, neighbour))
 
     # sort ridge edges by descending minimum skeleton height
-    minRidgeHeights = [min(s_heights[i1],s_heights[i2]) for i1,i2 in ridgeEdges]
+    minRidgeHeights = [(s_heights[i1]+s_heights[i2]) for i1,i2 in ridgeEdges]
     # numpy.argsort replaced, see https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
     sortRidges = sorted(range(len(minRidgeHeights)), key=minRidgeHeights.__getitem__)[::-1]
 
@@ -224,8 +246,8 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         # find anchor and unit vector outside of existing rectangles
         # try first the nodes of the ridge and then the midpoint if no success
         i1, i2 = ridgeEdges[ridge]
-        v1 = skeleton[i1].source
-        v2 = skeleton[i2].source
+        v1 = s_nodes[i1]#skeleton[i1].source
+        v2 = s_nodes[i2]#skeleton[i2].source
         mid = v1 + (v2-v1)/2.
         anchor = None
         if isOutside(v1,rectangles):
@@ -248,7 +270,7 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         # the distance of edges almost parallel to this ridge is given by the height
         # of the nodes in the skeleton. We take the minimal height and subtract a
         # safety margin of size MARGIN to get the horizontal dimension as long as possible 
-        yDist = min(skeleton[i1].height,skeleton[i2].height) - MARGIN
+        yDist = min(s_heights[i1],s_heights[i2]) - MARGIN
         
         # get the x-values of all vertices in the range -yDist < y < yDist
         verticesX = [v[0] for v in rotVerts if abs(v[1]) < yDist ]
@@ -262,8 +284,10 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
                 verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],yDist) )
 
         # find x-limits left and right of the anchor
-        leftX  = max([x for x in verticesX if x < 0.]) + 0.1
-        rightX = min([x for x in verticesX if x >= 0.]) - 0.1
+        leftX  = (max([x for x in verticesX if x < 0.]) + 0.1)  if any( (x<0.) for x in verticesX) else None
+        rightX = (min([x for x in verticesX if x >= 0.]) - 0.1) if any( (x>=0.) for x in verticesX) else None
+        if not (leftX and rightX):
+            continue
 
         # discard rectangle if too small
         if (rightX-leftX) < MINDIM and 2*yDist < MINDIM:
