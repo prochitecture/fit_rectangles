@@ -6,7 +6,7 @@ from lib.bpypolyskel.bpyeuclid import Edge2
 # parameters
 MAX_SLOPE    = tan(5./180.*pi)  # maximum slope (5°) of skeleton edges to be accepted as roof rodges
 MAX_STRAIGHT = sin(5./180.*pi)  # maximum angle (5°) between edges to be accepted as straight angle
-MARGIN       = 0.5              # vertical safety margin of rectangle 
+MARGIN       = 0.1              # vertical safety margin of rectangle 
 MINDIM       = 2.               # minimal dimension of the rectangles 
 
 # crossing number test for a point in a polygon
@@ -78,6 +78,40 @@ def xIntersection(p1, p2, y):
     x0 = p1[0]
     y0 = p1[1] + y
     return (x0+abs(y0/dy)*dx ) if dy else 0.
+
+# find intersections to produce maximal area rectangle
+def findMaxAreaRect(edges, rotVerts, maxYDist):
+    maxArea = 0.
+    bestYDist = maxYDist
+    bestLeftX = 0.
+    bestRightX = 0.
+    # iterate from maxYDist in steps of maxYDist/20 downwards
+    for i in range(20,4,-1):
+        yDist = maxYDist*i/20.
+        # get the x-values of all vertices in the range -yDist < y < yDist
+        verticesX = [v[0] for v in rotVerts if abs(v[1]) < yDist ]
+        # # add the x-values of the intersections of lines parallel to the x-axis
+        # # at y=-yDist and y=yDist
+        for i1,i2 in edges:
+            if ((rotVerts[i1][1]-yDist)>0.) ^ ((rotVerts[i2][1]-yDist)>0.): # detects sign change of y -> intersection
+                verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],-yDist) )
+            if ((rotVerts[i1][1]+yDist)>0.) ^ ((rotVerts[i2][1]+yDist)>0.): # detects sign change of y -> intersection
+                verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],yDist) )
+        # # find x-limits left and right of the anchor at (0.,0.)
+        leftX  = (max([x for x in verticesX if x < 0.]) )  if any( (x<0.) for x in verticesX) else 0.
+        rightX = (min([x for x in verticesX if x >= 0.]) ) if any( (x>=0.) for x in verticesX) else 0.
+        # compute area of rectangle
+        area = yDist*(rightX-leftX)
+        # continue if increased, else break
+        if area > maxArea:
+            maxArea = area
+            bestYDist = yDist
+            bestLeftX = leftX
+            bestRightX = rightX
+        else:
+            break
+    # add a small tolerance margin to limits to avoid rectangle intersections
+    return bestYDist, bestLeftX+MARGIN, bestRightX-MARGIN
 
 
 def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=None):
@@ -253,14 +287,14 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         v2 = s_nodes[i2]#skeleton[i2].source
         mid = v1 + (v2-v1)/2.
         anchor = None
-        if isOutside(v1,rectangles):
+        if isOutside(mid,rectangles):
+            anchor = mid
+            uVec = (v1-anchor).normalized()
+        elif isOutside(v1,rectangles):
             anchor = v1
             uVec = (v2-anchor).normalized()
         elif isOutside(v2,rectangles):
             anchor = v2
-            uVec = (v1-anchor).normalized()
-        elif isOutside(mid,rectangles):
-            anchor = mid
             uVec = (v1-anchor).normalized()
         else:
             # ridge is assumed to be in a rectangle, try next one
@@ -273,24 +307,10 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         # the distance of edges almost parallel to this ridge is given by the height
         # of the nodes in the skeleton. We take the minimal height and subtract a
         # safety margin of size MARGIN to get the horizontal dimension as long as possible 
-        yDist = min(s_heights[i1],s_heights[i2]) - MARGIN
+        yDist = max( min(s_heights[i1],s_heights[i2]) - MARGIN, 0. )
         
-        # get the x-values of all vertices in the range -yDist < y < yDist
-        verticesX = [v[0] for v in rotVerts if abs(v[1]) < yDist ]
-
-        # add the x-values of the intersections of lines parallel to the x-axis
-        # at y=-yDist and y=yDist
-        for i1,i2 in edges:
-            if ((rotVerts[i1][1]-yDist)>0.) ^ ((rotVerts[i2][1]-yDist)>0.): # detects sign change of y -> intersection
-                verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],-yDist) )
-            if ((rotVerts[i1][1]+yDist)>0.) ^ ((rotVerts[i2][1]+yDist)>0.): # detects sign change of y -> intersection
-                verticesX.append( xIntersection(rotVerts[i1],rotVerts[i2],yDist) )
-
-        # find x-limits left and right of the anchor
-        leftX  = (max([x for x in verticesX if x < 0.]) + 0.1)  if any( (x<0.) for x in verticesX) else None
-        rightX = (min([x for x in verticesX if x >= 0.]) - 0.1) if any( (x>=0.) for x in verticesX) else None
-        if not (leftX and rightX):
-            continue
+        # find intersections to produce maximal area rectangle
+        yDist, leftX, rightX = findMaxAreaRect(edges, rotVerts, yDist)
 
         # discard rectangle if too small
         if (rightX-leftX) < MINDIM and 2*yDist < MINDIM:
