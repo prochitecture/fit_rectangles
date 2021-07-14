@@ -293,14 +293,22 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
                 index2 = skelIndex[0]
                 skelEdges.append((index1,index2))
 
-    # maybe the building is circular, then create artificial skeleton edge
-    if len(s_nodes)==1:
-        s_nodes = [ s_nodes[0]-mathutils.Vector((0.2,0)), s_nodes[0]+mathutils.Vector((0.2,0))]
-        s_heights = [ s_heights[0]/1.414, s_heights[0]/1.414 ]
-        skelEdges = [(0,1)]
-
     # find ridges (indices of roof edges) (egde slope < MAX_SLOPE)
     skelEdges = [(i1,i2) for i1,i2 in skelEdges if abs(s_heights[i1]-s_heights[i2])/(s_nodes[i1]-s_nodes[i2]).magnitude < MAX_SLOPE]
+
+    # no skeleton edges usable, create one in the center of gravity of the existing nodes
+    # maybe the building is circular
+    if not skelEdges:
+        if s_nodes:
+            temp_center = sum(
+                ( s for s in s_nodes ),
+                mathutils.Vector((0., 0.))
+            )/len(s_nodes)
+            s_nodes = [ temp_center-mathutils.Vector((0.2,0)), temp_center+mathutils.Vector((0.2,0))]
+            s_heights = [ s_heights[0]/1.414, s_heights[0]/1.414 ]
+            skelEdges = [(0,1)]
+        else:
+            return []
 
     # remove ridge vertices that have straight angles between their edges.
     # construct graph
