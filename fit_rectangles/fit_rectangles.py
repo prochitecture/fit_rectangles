@@ -70,7 +70,7 @@ def doCollideRect(rectangle, rectangles):
  
     return False
 
-# compute the x-value of the intersction of the segment p1-p2 with
+# compute the x-value of the intersection of the segment p1-p2 with
 # a line parallel to the x-axis at y
 def xIntersection(p1, p2, y):
     dx = p2[0] - p1[0]
@@ -78,6 +78,15 @@ def xIntersection(p1, p2, y):
     x0 = p1[0]
     y0 = p1[1] + y
     return (x0+abs(y0/dy)*dx ) if dy else 0.
+
+# compute the x-value of the intersection of the segment p1-p2 with
+# a line parallel to the y-axis at x
+def yIntersection(p1, p2, x):
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    x0 = p1[0] + x
+    y0 = p1[1] 
+    return (y0+abs(x0/dx)*dy ) if dx else 0.
 
 # find intersections to produce maximal area rectangle
 def findMaxAreaRect(edges, rotVerts, maxYDist):
@@ -113,6 +122,60 @@ def findMaxAreaRect(edges, rotVerts, maxYDist):
     # add a small tolerance margin to limits to avoid rectangle intersections
     return bestYDist, bestLeftX+MARGIN, bestRightX-MARGIN
 
+def fitToQuadrilateral(edges2D):
+    angles = [pair[0].norm.cross(pair[1].norm) for pair in zip(edges2D, edges2D[1:] + edges2D[:1])]
+    if any(a < 0. for a in angles):   # check if convex
+        return None
+
+    if all( a > 0.9999 for a in angles): # this is already a rectangle
+        return [v.p1 for v in edges2D]
+
+    # find longest edge
+    lengths = [e.length_squared() for e in edges2D]
+    longest = lengths.index(max(lengths))
+
+    # move first vertice of longest edge to front
+    vertices = [e.p1 for e in edges2D]
+    vertices = vertices[longest:] + vertices[:longest]
+
+    # shift and rotate all vertices so that longest edge is along x-axis, p1 at (0,0)
+    uVec = edges2D[longest].norm
+    anchor = vertices[0]
+    rotFwd = mathutils.Matrix( [ (uVec[0], -uVec[1]), (uVec[1], uVec[0]) ] )
+    # BL: bottom left, BR: bottom right, TR: top right, TL: top left
+    BL, BR, TR, TL = [ (v-anchor) @ rotFwd for v in vertices ]
+
+    # find rectangle vertices on left side ...
+    if BL[0] >= TL[0]:
+        TL[0] = BL[0]
+        TL[1] = yIntersection(TL,TR,BL[0])
+    else:
+        if TR[1] <= TL[1]:
+            BL[0] = TL[0] = xIntersection(BL,TL,TR[1])
+            TL[1] = TR[1]
+        else:
+            BL[0] = TL[0]
+    # ... and on right side
+    if BR[0] <= TR[0]:
+        TR[0] = BR[0]
+        TR[1] = yIntersection(TL,TR,BR[0])
+    else:
+        if TR[1] >= TL[1]:
+            BR[0] = TR[0] = xIntersection(BR,TR,TL[1])
+            TR[1] = TL[1]
+        else:
+            BR[0] = TR[0]
+
+    TL[1] = TR[1] = min(TL[1],TR[1])
+
+    # # define rectangle vertices and edges
+    rectangle = [ BL, BR, TR, TL ]
+
+    # rotate and shift this rectangle back to the original position
+    rotRev = mathutils.Matrix( [ (uVec[0], uVec[1]), (-uVec[1], uVec[0]) ] )
+    rectangle = [ (v @ rotRev)+anchor for v in rectangle ]
+
+    return rectangle
 
 def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=None):
     """
@@ -183,7 +246,16 @@ def fit_rectangles(verts, firstVertIndex, numVerts, holesInfo=None, unitVectors=
         ]
         edges2D.append(Edge2(lastVertIndex, firstVertIndex, None, verts, center))
     edgeContours = [edges2D.copy()]
-    
+
+    # process quadrilaterals if any
+    if numVerts <=4 and not holesInfo:
+        rectangle = fitToQuadrilateral(edges2D)
+        if rectangle:
+            rectList = [
+                tuple( (v + center) for v in rectangle )
+            ]
+            return rectList
+
     uIndex = numVerts
     if holesInfo:
         for firstVertIndexHole,numVertsHole in holesInfo:
